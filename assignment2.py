@@ -53,11 +53,10 @@ def printFunction(finalFlows): #prints all the information that we extracted fro
 def pcap_parser():
     #path = input("Enter the file path of the pcap file: ")
     #Hard coded path for now to test
-    path = "c:\\Users\\Rishith\\OneDrive\\Documents\\CSE310-Hw2\\assignment2.pcap"
     while path[-5:] != ".pcap":
         path = input("Incorrect file path enterred, please enter correct file path: ")
     print()
-    file = open(path, 'rb') #opening the file in read byte mode
+    file = open("assignment2.pcap", 'rb') #opening the file in read byte mode
     pcap = dpkt.pcap.Reader(file) #Reader class that takes a file object and reads from it
     finalFlows = [] #gonna contain all the flows to print at the end / contains object NetworkFlow after each flow finishes
     flowTracker = {} #key : (tuple of flow) Value : information about Flow
