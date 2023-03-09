@@ -30,7 +30,7 @@ class Transaction: #Class for Transactions within the Flows
 
 def printFunction(finalFlows): #prints all the information that we extracted from the PCAP packet
     flowNum = 1
-    for flow in finalFlows:
+    for key,flow in finalFlows.items():
         transac1SendToRec = flow.sendToRecFlow1
         transac1RecToSend = flow.recToSendFlow1
         transac2SendToRec = flow.sendToRecFlow2
@@ -47,18 +47,18 @@ def printFunction(finalFlows): #prints all the information that we extracted fro
         timeDiff = flow.finishTime - flow.initTime #calculating time difference
         throughput = flow.throughput / timeDiff #calculating throughput
         print(f'  Throughput = {throughput} bytes/second')
-        print("---------------------------------------------------")
+        print("-----------------------------------------------------")
         flowNum += 1
 
 def pcap_parser():
     #path = input("Enter the file path of the pcap file: ")
     #Hard coded path for now to test
-    while path[-5:] != ".pcap":
-        path = input("Incorrect file path enterred, please enter correct file path: ")
-    print()
+    # while path[-5:] != ".pcap":
+    #     path = input("Incorrect file path enterred, please enter correct file path: ")
+    # print()
     file = open("assignment2.pcap", 'rb') #opening the file in read byte mode
     pcap = dpkt.pcap.Reader(file) #Reader class that takes a file object and reads from it
-    finalFlows = [] #gonna contain all the flows to print at the end / contains object NetworkFlow after each flow finishes
+   # finalFlows = [] #gonna contain all the flows to print at the end / contains object NetworkFlow after each flow finishes
     flowTracker = {} #key : (tuple of flow) Value : information about Flow
     for ts, buff in pcap: #accessing each packet contained in the pcap object / ts : time stamp / #buff : buffer (packet data length would be len(buff)) (contains the data)
         eth = dpkt.ethernet.Ethernet(buff) #parses and decodes the packet data into a eth object / more usable form / Now that the IP and TCP layer information has been decoded, we can access it
@@ -80,41 +80,46 @@ def pcap_parser():
         tcpAck = tcp.ack  # tcp ack number
         tcpRecWin = tcp.win  # tcp window value
         
-        if (tcp.flags and (tcp.flags & tcpFlagDict["SYN"]) and (tcp.flags & tcpFlagDict["ACK"])): #Receiver to Sender communication
-            backwardTup = (dstIp, dstPort, srcIP, srcPort)
-            flow = flowTracker[forwardTup] 
-            if backwardTup in flowTracker:
-                if flowTracker[forwardTup].recToSendFlow1 == None: #Flow 1 Sender -> Receiver
-                    transacObj = Transaction(1, tcpSeq, tcpAck, tcpRecWin)
-                    flowTracker[forwardTup].recToSendFlow1 = transacObj #Resetting as this object
-                elif flowTracker[forwardTup].recToSendFlow2 == None: #Flow 2 Sender -> Receiver
-                    transacObj2 = Transaction(2, tcpSeq, tcpAck, tcpRecWin)
-                    flowTracker[forwardTup].recToSendFlow2 = transacObj2 #Resetting as this object
-                    flow.finishTime = ts #updating final time in the Flow after last acknowledgment
-            flow += flow.throughput
-                
-        elif (tcp.flags and (tcp.flags & tcpFlagDict["SYN"])): #Sender to Receiver
-            if forwardTup in flowTracker: #flow already existing / edge case
+        # if (tcp.flags and (tcp.flags & tcpFlagDict["SYN"]) and (tcp.flags & tcpFlagDict["ACK"])): #Receiver to Sender communication
+        backwardTup = (dstIp, dstPort, srcIP, srcPort)
+
+        if (tcp.flags and (tcp.flags & tcpFlagDict["SYN"])): #Sender to Receiver
+            if forwardTup in flowTracker or backwardTup in flowTracker: #flow already existing / edge case
                 continue
             else:
                 flowTracker[forwardTup] = NetworkFlow(srcIP, srcPort, dstIp, dstPort, ts, 0, 0, 0, None, None, None, None) #Just for initializing F : forward B : backward
 
         elif (tcp.flags and (tcp.flags & tcpFlagDict["FIN"])): #just calculate the flow time finish
-            if forwardTup in flowTracker:
-                finalFlows.append(flow) #Appending the flow so can print later all the information stored of the transactions
+            #if forwardTup in flowTracker:
+                #finalFlows.append(flow) #Appending the flow so can print later all the information stored of the transactions
+            pass
         else:
-            if forwardTup in flowTracker: #Transaction from sender to receiver is being done
-                flow = flowTracker[forwardTup] 
-                if flowTracker[forwardTup].sendToRecFlow1 == None: #Flow 1 Sender -> Receiver
-                    transacObj = Transaction(1, tcpSeq, tcpAck, tcpRecWin)
-                    flowTracker[forwardTup].sendToRecFlow1 = transacObj #Resetting as this object
-                elif flowTracker[forwardTup].sendToRecFlow2 == None: #Flow 2 Sender -> Receiver
-                    transacObj2 = Transaction(2, tcpSeq, tcpAck, tcpRecWin)
-                    flowTracker[forwardTup].sendToRecFlow1 = transacObj2 #Resetting as this object
-                    
-                #Adding throughput no matter what
-                flow += flow.throughput
-        printFunction(finalFlows)
+            if srcIP == '130.245.145.12': #hard coded ip
+                if forwardTup in flowTracker: #Transaction from sender to receiver is being done
+                    flow = flowTracker[forwardTup] 
+                    if flowTracker[forwardTup].sendToRecFlow1 == None: #Transac 1 Sender -> Receiver
+                        transacObj = Transaction(1, tcpSeq, tcpAck, tcpRecWin)
+                        flowTracker[forwardTup].sendToRecFlow1 = transacObj #Resetting as this object
+                    elif flowTracker[forwardTup].sendToRecFlow2 == None and (tcpSeq != flowTracker[forwardTup].sendToRecFlow1.seqNumb): #Transac 2 Sender -> Receiver
+                        transacObj2 = Transaction(2, tcpSeq, tcpAck, tcpRecWin)
+                        flowTracker[forwardTup].sendToRecFlow2 = transacObj2 #Resetting as this object
+            #Adding throughput no matter what
+            if srcIP == '128.208.2.198':
+                if backwardTup in flowTracker: #For receiver to sender 
+                    flow = flowTracker[backwardTup]
+                    if flowTracker[backwardTup].recToSendFlow1 == None: #Transac 1 Receiver -> Sender
+                        if tcpSeq == flow.sendToRecFlow1.AckNum:
+                            transacObj = Transaction(1, tcpSeq, tcpAck, tcpRecWin)
+                            flowTracker[backwardTup].recToSendFlow1 = transacObj #Resetting as this object
+
+                    elif flowTracker[backwardTup].recToSendFlow2 == None: #Transac 2 Receiver -> Sender
+                        if tcpSeq == flow.sendToRecFlow2.AckNum:
+                            transacObj2 = Transaction(2, tcpSeq, tcpAck, tcpRecWin)
+                            flowTracker[backwardTup].recToSendFlow2 = transacObj2 #Resetting as this object
+            flow.finishTime = ts #updating final time in the Flow after last acknowledgment
+            flow.throughput += len(tcp)
+            
+    printFunction(flowTracker)
 
 if __name__ == "__main__":
     pcap_parser()
