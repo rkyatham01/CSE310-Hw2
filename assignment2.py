@@ -2,12 +2,15 @@ import dpkt
 import sys
 import socket
 from collections import deque
+from collections import defaultdict
 #Creating a dictionary as a shortcut to the flags
 tcpFlagDict = {'FIN': dpkt.tcp.TH_FIN,'SYN': dpkt.tcp.TH_SYN,'RST': dpkt.tcp.TH_RST,
                'PUSH': dpkt.tcp.TH_PUSH,'ACK': dpkt.tcp.TH_ACK}
 
 class NetworkFlow: #class for Flow information
-    def __init__(self,srcIP,srcPort,dstIp, dstPort,initTime, finishTime, transacLen, throughput, sendToRecFlow1, recToSendFlow1, sendToRecFlow2, recToSendFlow2, packageArrSendToRec, packageArrRecToSend, transacAvgTime, congWindowArr, recToSenderAckArr, sendToReceiverSeqArr, orderedpackageArr):
+    def __init__(self,srcIP,srcPort,dstIp, dstPort,initTime, finishTime, transacLen, throughput, sendToRecFlow1, recToSendFlow1, sendToRecFlow2, 
+        recToSendFlow2, packageArrSendToRec, packageArrRecToSend, transacAvgTime, congWindowArr, 
+        recToSenderAckArr, sendToReceiverSeqArr, orderedpackageArr, timeoutretransmissions, tripleAck, otherTransmission,hashMap):
         self.srcIP = srcIP
         self.srcPort = srcPort
         self.dstIp = dstIp
@@ -27,6 +30,10 @@ class NetworkFlow: #class for Flow information
         self.recToSenderAckArr = recToSenderAckArr
         self.sendToReceiverSeqArr = sendToReceiverSeqArr
         self.orderedpackageArr = orderedpackageArr
+        self.timeoutretransmissions = timeoutretransmissions
+        self.tripleAck = tripleAck
+        self.otherTransmission = otherTransmission
+        self.hashMap = hashMap
 
 class Transaction: #Class for Transactions within the Flows
     def __init__(self, transactionNum, seqNumb, AckNum, RecWin):
@@ -46,7 +53,7 @@ class Packet: #Class for packets
 
 def printFunction(finalFlows): #prints all the information that we extracted from the PCAP packet
     flowNum = 1
-    for key,flow in finalFlows.items():
+    for _,flow in finalFlows.items():
         transac1SendToRec = flow.sendToRecFlow1
         transac1RecToSend = flow.recToSendFlow1
         transac2SendToRec = flow.sendToRecFlow2
@@ -64,6 +71,10 @@ def printFunction(finalFlows): #prints all the information that we extracted fro
         throughput = flow.throughput / timeDiff #calculating throughput
         print(f'  Throughput = {throughput} bytes/second')
         print(f'  Congestion Window Sizes : {flow.congWindowArr}')
+        print(f'  Timeouts = {flow.timeoutretransmissions}')
+        print(f'  Triple Acks = {flow.tripleAck}')
+        print(f'  Total Transmissions = {flow.otherTransmission + flow.timeoutretransmissions + flow.tripleAck}')
+        print(f'  Other Transmissions = {flow.otherTransmission}')
         print("-----------------------------------------------------")
         flowNum += 1
 
@@ -77,6 +88,8 @@ def pcap_parser():
     pcap = dpkt.pcap.Reader(file) #Reader class that takes a file object and reads from it
    # finalFlows = [] #gonna contain all the flows to print at the end / contains object NetworkFlow after each flow finishes
     flowTracker = {} #key : (tuple of flow) Value : information about Flow
+    packetMap = {}
+
     for ts, buff in pcap: #accessing each packet contained in the pcap object / ts : time stamp / #buff : buffer (packet data length would be len(buff)) (contains the data)
         eth = dpkt.ethernet.Ethernet(buff) #parses and decodes the packet data into a eth object / more usable form / Now that the IP and TCP layer information has been decoded, we can access it
         #pk.data is the IP object and pk.data.data is the TCP object
@@ -104,7 +117,7 @@ def pcap_parser():
             if forwardTup in flowTracker or backwardTup in flowTracker: #flow already existing / edge case
                 continue
             else:
-                flowTracker[forwardTup] = NetworkFlow(srcIP, srcPort, dstIp, dstPort, ts, 0, 0, 0, None, None, None, None, [], [], 0, [], [], [], []) #Just for initializing F : forward B : backward
+                flowTracker[forwardTup] = NetworkFlow(srcIP, srcPort, dstIp, dstPort, ts, 0, 0, 0, None, None, None, None, [], [], 0, [], [], [], [], 0, 0, 0, {}) #Just for initializing F : forward B : backward
         elif (tcp.flags and (tcp.flags & tcpFlagDict["FIN"])): #just calculate the flow time finish
             #if forwardTup in flowTracker:
                 #finalFlows.append(flow) #Appending the flow so can print later all the information stored of the transactions
@@ -124,6 +137,8 @@ def pcap_parser():
                 newPacket = Packet(ts,'130.245.145.12', srcPort, len(tcp.data), tcpSeq, tcpAck) #Creates a new packet coming in from sender
                 flow.orderedpackageArr.append(newPacket)
                 flow.packageArrSendToRec.append(newPacket) #adding packages from sender to receiver
+                if tcpSeq not in packetMap:
+                    packetMap[tcpSeq] = ts
             #Adding throughput no matter what
             if srcIP == '128.208.2.198':
                 if backwardTup in flowTracker: #For receiver to sender 
@@ -142,8 +157,21 @@ def pcap_parser():
                 newPacket2 = Packet(ts,'128.208.2.198',srcPort, len(tcp.data), tcpSeq, tcpAck) #Creates a new packet coming in from sender
                 flow.packageArrRecToSend.append(newPacket2) #adding packages from receiver to sender
                 flow.orderedpackageArr.append(newPacket2)
+                if tcp.ack in packetMap:
+                    if ts - packetMap[tcp.ack] > (2 * flow.transacAvgTime):
+                        flow.timeoutretransmissions += 1
+                    packetMap.pop(tcpAck)
+
+                if tcpSeq not in flow.hashMap: #Used for calculating other transmissions
+                    flow.hashMap[tcpSeq] = 1
+                else:
+                    flow.hashMap[tcpSeq] += 1
+
             flow.finishTime = ts #updating final time in the Flow after last acknowledgment
             flow.throughput += len(tcp)
+    
+    for _,flow in flowTracker.items(): #For Calculating Congestion Window
+        flow.otherTransmission = len(flow.hashMap)
             
     for _,flow in flowTracker.items(): #For Calculating Congestion Window
         tempCongWindows = []
@@ -182,23 +210,8 @@ def pcap_parser():
                     if que[-1] == que[-2] == que[-3]:
                         arrForTripleAcks.append(que[-1])
                     que.popleft()
-        print("Retransmission due to triple Ack", retransmissionCount)
-
-    for _,flow in flowTracker.items(): #For Calculating the retransmissions for timeouts
-        rtt = flow.transacAvgTime #contains the rtt value
-        retransmissionCountTimeouts = 0
-        seqNumDict = {} #mapping seq Num : time
-
-        for packet in packageOrdArr:
-            if (packet.seqNum in seqNumDict) and packet.senderRecIp == '128.208.2.198': #packet with same seq number detected 
-                if packet.time - seqNumDict[packet.seqNum] > 2 * rtt:
-                    retransmissionCountTimeouts += 1
-            elif packet.senderRecIp == '130.245.145.12':
-                seqNumDict[packet.ackNum] = packet.time
-
-        print("reTransmissions for timeouts",retransmissionCountTimeouts)
-
-    #printFunction(flowTracker)
-
+        flow.tripleAck = retransmissionCount
+    
+    printFunction(flowTracker) #Prints all the output to the screen
 if __name__ == "__main__":
     pcap_parser()
