@@ -156,7 +156,7 @@ def pcap_parser():
                 flow.packageArrRecToSend.append(newPacket2) #adding packages from receiver to sender
                 flow.orderedpackageArr.append(newPacket2)
                 if tcp.ack in packetMap:
-                    if ts - packetMap[tcp.ack] > (2 * flow.transacAvgTime):
+                    if ts - packetMap[tcp.ack] >= (2 * flow.transacAvgTime):
                         flow.timeoutretransmissions += 1
                     packetMap.pop(tcpAck)
 
@@ -169,17 +169,19 @@ def pcap_parser():
             flow.throughput += len(tcp)
     
     for _,flow in flowTracker.items(): #For Calculating Congestion Window
-        flow.otherTransmission = len(flow.hashMap)
-            
+        c = 0 #counter
+        for _, value in flow.hashMap.items():
+            if value >= 2:
+                c += 1
+        flow.otherTransmission = c
+        
     for _,flow in flowTracker.items(): #For Calculating Congestion Window
-        #Comment on how the congestion window grows :
-        #My objective to find the congestion window is supported by looking within 1 RTT of the number of packets that are transmitted.
-        #I counted the number of packets sent within 1 RTT and then counted the packets sent within the next RTT.
-        #From each timestamp, starting from the first packets time, I change my end of congestion window to that timestamp + rtt. 
-        #Due to networks getting clogged, there may be delays which could lead to results aren't the best.
-        #From the 3 flows in the PCAP file analyzed, the congestion window sizes are [11,19,32], [11,31,43], and [11,21,34].
-        #Congestion windows are used to avoid network congestion and the congestion window size grew 
-
+        #My objective to find the congestion window is supported by looking within 1 RTT of the number of packets that are transmitted. 
+        #I counted the number of packets sent within 1 RTT and then counted the packets sent within the next RTT. For each timestamp,  
+        #starting from the first packet time, I changed my end of the congestion window to that timestamp + rtt. Due to the networks getting clogged, 
+        #there may be delays which could lead to results that aren’t the best. From the 3 flows in the PCAP file we had to analyze, 
+        #the congestion window sizes are respectively [11,19,32], [11,31,43], and [11,21,34]. These window sizes show that they increase 
+        #linearly or in a small exponential kind of way and they would get leveled off quickly. It can grow linearly if it probably can get past the fast start.
         tempCongWindows = []
         origPackageArr = flow.packageArrSendToRec
         firstPacket = origPackageArr[0]
