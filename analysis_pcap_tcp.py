@@ -79,12 +79,12 @@ def printFunction(finalFlows): #prints all the information that we extracted fro
         flowNum += 1
 
 def pcap_parser():
-    #path = input("Enter the file path of the pcap file: ")
+    path = input("Enter the file path of the pcap file: ")
     #Hard coded path for now to test
-    # while path[-5:] != ".pcap":
-    #     path = input("Incorrect file path enterred, please enter correct file path: ")
-    # print()
-    file = open("assignment2.pcap", 'rb') #opening the file in read byte mode
+    while path[-5:] != ".pcap":
+        path = input("Incorrect file path enterred, please enter correct file path: ")
+    print()
+    file = open(path, 'rb') #opening the file in read byte mode
     pcap = dpkt.pcap.Reader(file) #Reader class that takes a file object and reads from it
    # finalFlows = [] #gonna contain all the flows to print at the end / contains object NetworkFlow after each flow finishes
     flowTracker = {} #key : (tuple of flow) Value : information about Flow
@@ -119,8 +119,6 @@ def pcap_parser():
             else:
                 flowTracker[forwardTup] = NetworkFlow(srcIP, srcPort, dstIp, dstPort, ts, 0, 0, 0, None, None, None, None, [], [], 0, [], [], [], [], 0, 0, 0, {}) #Just for initializing F : forward B : backward
         elif (tcp.flags and (tcp.flags & tcpFlagDict["FIN"])): #just calculate the flow time finish
-            #if forwardTup in flowTracker:
-                #finalFlows.append(flow) #Appending the flow so can print later all the information stored of the transactions
             pass
         else:
             if srcIP == '130.245.145.12': #hard coded ip
@@ -174,6 +172,14 @@ def pcap_parser():
         flow.otherTransmission = len(flow.hashMap)
             
     for _,flow in flowTracker.items(): #For Calculating Congestion Window
+        #Comment on how the congestion window grows :
+        #My objective to find the congestion window is supported by looking within 1 RTT of the number of packets that are transmitted.
+        #I counted the number of packets sent within 1 RTT and then counted the packets sent within the next RTT.
+        #From each timestamp, starting from the first packets time, I change my end of congestion window to that timestamp + rtt. 
+        #Due to networks getting clogged, there may be delays which could lead to results aren't the best.
+        #From the 3 flows in the PCAP file analyzed, the congestion window sizes are [11,19,32], [11,31,43], and [11,21,34].
+        #Congestion windows are used to avoid network congestion and the congestion window size grew 
+
         tempCongWindows = []
         origPackageArr = flow.packageArrSendToRec
         firstPacket = origPackageArr[0]
